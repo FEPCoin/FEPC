@@ -13,6 +13,8 @@ sudo apt-get install libboost-all-dev (Ubuntu)
 
 Build from source (after cloning repository):
 ```
+unzip fepz.zip -d fepc
+cd fpc
 mkdir build
 cd build
 cmake ..
