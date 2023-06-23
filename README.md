@@ -8,6 +8,8 @@ Coin ticker: FEPC
 
 Main net launch: 08-04-2023
 
+FEPC is based on (Dynex)[https://dynexcoin.org] pioneering work in the field of neuromorphic computing but is a pure CryptoNight based POW coin. Miners can optionally perform scientific computations but also use ASICs for mining.
+
 ## Artificial Intelligence
 
 In twenty years, nearly all data will become digitised, making it possible to use AI for decision-making and optimization. AI and automation will replace most blue-collar work and “make” products for minimal marginal cost. Robots and AI will take over the manufacturing, delivery, design and marketing of most goods. FEPC is an innovative blockchain enabling Artificial Intelligence. 
