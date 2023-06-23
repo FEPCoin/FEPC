@@ -3,7 +3,9 @@
 In twenty years, nearly all data will become digitised. FEPC is an innovative blockchain enabling Artificial Intelligence.
 
 Coin name: Future Economy Pay
+
 Coin ticker: FEPC
+
 Main net launch: 08-04-2023
 
 ## Artificial Intelligence
