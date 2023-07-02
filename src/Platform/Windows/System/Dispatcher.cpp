@@ -16,6 +16,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Bytecoin.  If not, see <http://www.gnu.org/licenses/>.
 
+#include <stdexcept>
 #include "Dispatcher.h"
 #include <cassert>
 #include <string>
