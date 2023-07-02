@@ -1,35 +1,57 @@
+// Copyright (c) 2021-2022, Dynex Developers
+// 
+// All rights reserved.
+// 
+// Redistribution and use in source and binary forms, with or without modification, are
+// permitted provided that the following conditions are met:
+// 
+// 1. Redistributions of source code must retain the above copyright notice, this list of
+//    conditions and the following disclaimer.
+// 
+// 2. Redistributions in binary form must reproduce the above copyright notice, this list
+//    of conditions and the following disclaimer in the documentation and/or other
+//    materials provided with the distribution.
+// 
+// 3. Neither the name of the copyright holder nor the names of its contributors may be
+//    used to endorse or promote products derived from this software without specific
+//    prior written permission.
+// 
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY
+// EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+// MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL
+// THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+// STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
+// THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// 
+// Parts of this project are originally copyright by:
 // Copyright (c) 2012-2016, The CryptoNote developers, The Bytecoin developers
-// Copyright (c) 2017-2019, The CROAT.community developers
-//
-// This file is part of Bytecoin.
-//
-// Bytecoin is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// Bytecoin is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Lesser General Public License for more details.
-//
-// You should have received a copy of the GNU Lesser General Public License
-// along with Bytecoin.  If not, see <http://www.gnu.org/licenses/>.
+// Copyright (c) 2014-2018, The Monero project
+// Copyright (c) 2014-2018, The Forknote developers
+// Copyright (c) 2018, The TurtleCoin developers
+// Copyright (c) 2016-2018, The Karbowanec developers
+// Copyright (c) 2017-2022, The CROAT.community developers
+
 
 #include "MemoryMappedFile.h"
 
-#include <cassert>
+#include <fcntl.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
-#define NOMINMAX
-#include <windows.h>
+#include <cassert>
 
 #include "Common/ScopeExit.h"
 
 namespace System {
 
 MemoryMappedFile::MemoryMappedFile() :
-  m_fileHandle(INVALID_HANDLE_VALUE),
-  m_mappingHandle(INVALID_HANDLE_VALUE),
+  m_file(-1),
   m_size(0),
   m_data(nullptr) {
 }
@@ -76,41 +98,23 @@ void MemoryMappedFile::create(const std::string& path, uint64_t size, bool overw
   }
 
   Tools::ScopeExit failExitHandler([this, &ec] {
-    ec = std::error_code(::GetLastError(), std::system_category());
+    ec = std::error_code(errno, std::system_category());
     std::error_code ignore;
     close(ignore);
   });
 
-  m_fileHandle = ::CreateFile(
-    path.c_str(),
-    GENERIC_READ | GENERIC_WRITE,
-    FILE_SHARE_DELETE | FILE_SHARE_READ,
-    NULL,
-    overwrite ? CREATE_ALWAYS : CREATE_NEW,
-    FILE_ATTRIBUTE_NORMAL,
-    NULL);
-  if (m_fileHandle == INVALID_HANDLE_VALUE) {
+  m_file = ::open(path.c_str(), O_RDWR | O_CREAT | (overwrite ? O_TRUNC : O_EXCL), S_IRUSR | S_IWUSR);
+  if (m_file == -1) {
     return;
   }
 
-  LONG distanceToMoveHigh = static_cast<LONG>((size >> 32) & UINT64_C(0xffffffff));
-  DWORD filePointer = ::SetFilePointer(m_fileHandle, static_cast<LONG>(size & UINT64_C(0xffffffff)), &distanceToMoveHigh, FILE_BEGIN);
-  if (filePointer == INVALID_SET_FILE_POINTER) {
+  int result = ::ftruncate(m_file, static_cast<off_t>(size));
+  if (result == -1) {
     return;
   }
 
-  BOOL result = ::SetEndOfFile(m_fileHandle);
-  if (!result) {
-    return;
-  }
-
-  m_mappingHandle = ::CreateFileMapping(m_fileHandle, NULL, PAGE_READWRITE, 0, 0, NULL);
-  if (m_mappingHandle == NULL) {
-    return;
-  }
-
-  m_data = reinterpret_cast<uint8_t*>(::MapViewOfFile(m_mappingHandle, FILE_MAP_ALL_ACCESS, 0, 0, 0));
-  if (m_data == NULL) {
+  m_data = reinterpret_cast<uint8_t*>(::mmap(nullptr, static_cast<size_t>(size), PROT_READ | PROT_WRITE, MAP_SHARED, m_file, 0));
+  if (m_data == MAP_FAILED) {
     return;
   }
 
@@ -138,38 +142,26 @@ void MemoryMappedFile::open(const std::string& path, std::error_code& ec) {
   }
 
   Tools::ScopeExit failExitHandler([this, &ec] {
-    ec = std::error_code(::GetLastError(), std::system_category());
+    ec = std::error_code(errno, std::system_category());
     std::error_code ignore;
     close(ignore);
   });
 
-  m_fileHandle = ::CreateFile(
-    path.c_str(),
-    GENERIC_READ | GENERIC_WRITE,
-    FILE_SHARE_DELETE | FILE_SHARE_READ,
-    NULL,
-    OPEN_EXISTING,
-    FILE_ATTRIBUTE_NORMAL,
-    NULL);
-  if (m_fileHandle == INVALID_HANDLE_VALUE) {
+  m_file = ::open(path.c_str(), O_RDWR, S_IRUSR | S_IWUSR);
+  if (m_file == -1) {
     return;
   }
 
-  LARGE_INTEGER fileSize;
-  BOOL result = ::GetFileSizeEx(m_fileHandle, &fileSize);
-  if (!result) {
+  struct stat fileStat;
+  int result = ::fstat(m_file, &fileStat);
+  if (result == -1) {
     return;
   }
 
-  m_size = static_cast<uint64_t>(fileSize.QuadPart);
+  m_size = static_cast<uint64_t>(fileStat.st_size);
 
-  m_mappingHandle = ::CreateFileMapping(m_fileHandle, NULL, PAGE_READWRITE, 0, 0, NULL);
-  if (m_mappingHandle == NULL) {
-    return;
-  }
-
-  m_data = reinterpret_cast<uint8_t*>(::MapViewOfFile(m_mappingHandle, FILE_MAP_ALL_ACCESS, 0, 0, 0));
-  if (m_data == NULL) {
+  m_data = reinterpret_cast<uint8_t*>(::mmap(nullptr, static_cast<size_t>(m_size), PROT_READ | PROT_WRITE, MAP_SHARED, m_file, 0));
+  if (m_data == MAP_FAILED) {
     return;
   }
 
@@ -190,12 +182,12 @@ void MemoryMappedFile::open(const std::string& path) {
 void MemoryMappedFile::rename(const std::string& newPath, std::error_code& ec) {
   assert(isOpened());
 
-  BOOL result = ::MoveFileEx(m_path.c_str(), newPath.c_str(), MOVEFILE_REPLACE_EXISTING);
-  if (result) {
+  int result = ::rename(m_path.c_str(), newPath.c_str());
+  if (result == 0) {
     m_path = newPath;
     ec = std::error_code();
   } else {
-    ec = std::error_code(::GetLastError(), std::system_category());
+    ec = std::error_code(errno, std::system_category());
   }
 }
 
@@ -210,39 +202,29 @@ void MemoryMappedFile::rename(const std::string& newPath) {
 }
 
 void MemoryMappedFile::close(std::error_code& ec) {
-  BOOL result;
+  int result;
   if (m_data != nullptr) {
     flush(m_data, m_size, ec);
     if (ec) {
       return;
     }
 
-    result = ::UnmapViewOfFile(m_data);
-    if (result) {
+    result = ::munmap(m_data, static_cast<size_t>(m_size));
+    if (result == 0) {
       m_data = nullptr;
     } else {
-      ec = std::error_code(::GetLastError(), std::system_category());
+      ec = std::error_code(errno, std::system_category());
       return;
     }
   }
 
-  if (m_mappingHandle != INVALID_HANDLE_VALUE) {
-    result = ::CloseHandle(m_mappingHandle);
-    if (result) {
-      m_mappingHandle = INVALID_HANDLE_VALUE;
-    } else {
-      ec = std::error_code(::GetLastError(), std::system_category());
-      return;
-    }
-  }
-
-  if (m_fileHandle != INVALID_HANDLE_VALUE) {
-    result = ::CloseHandle(m_fileHandle);
-    if (result) {
-      m_fileHandle = INVALID_HANDLE_VALUE;
+  if (m_file != -1) {
+    result = ::close(m_file);
+    if (result == 0) {
+      m_file = -1;
       ec = std::error_code();
     } else {
-      ec = std::error_code(::GetLastError(), std::system_category());
+      ec = std::error_code(errno, std::system_category());
       return;
     }
   }
@@ -261,16 +243,20 @@ void MemoryMappedFile::close() {
 void MemoryMappedFile::flush(uint8_t* data, uint64_t size, std::error_code& ec) {
   assert(isOpened());
 
-  BOOL result = ::FlushViewOfFile(data, static_cast<SIZE_T>(size));
-  if (result) {
-    result = ::FlushFileBuffers(m_fileHandle);
-    if (result) {
+  uintptr_t pageSize = static_cast<uintptr_t>(sysconf(_SC_PAGESIZE));
+  uintptr_t dataAddr = reinterpret_cast<uintptr_t>(data);
+  uintptr_t pageOffset = (dataAddr / pageSize) * pageSize;
+
+  int result = ::msync(reinterpret_cast<void*>(pageOffset), static_cast<size_t>(dataAddr % pageSize + size), MS_SYNC);
+  if (result == 0) {
+    result = ::fsync(m_file);
+    if (result == 0) {
       ec = std::error_code();
       return;
     }
   }
 
-  ec = std::error_code(::GetLastError(), std::system_category());
+  ec = std::error_code(errno, std::system_category());
 }
 
 void MemoryMappedFile::flush(uint8_t* data, uint64_t size) {
@@ -284,8 +270,7 @@ void MemoryMappedFile::flush(uint8_t* data, uint64_t size) {
 }
 
 void MemoryMappedFile::swap(MemoryMappedFile& other) {
-  std::swap(m_fileHandle, other.m_fileHandle);
-  std::swap(m_mappingHandle, other.m_mappingHandle);
+  std::swap(m_file, other.m_file);
   std::swap(m_path, other.m_path);
   std::swap(m_data, other.m_data);
   std::swap(m_size, other.m_size);
